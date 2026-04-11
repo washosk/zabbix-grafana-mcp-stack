@@ -39,13 +39,42 @@ cd zabbix-grafana-mcp-stack
 ./setup-zabbix-grafana-mcp.sh
 ```
 
-The script guides you through the full setup interactively:
+The script walks through the full setup in one session. Here is what happens at each step:
 
-1. Writes a placeholder `.env` — pause to set passwords
-2. Starts the core stack (Zabbix + Grafana), polls until ready
-3. Prints token creation instructions — pause to create and paste tokens into `.env`
-4. Starts both MCP servers, polls until healthy
-5. Reads the auto-generated Zabbix MCP admin portal password from logs and prints it
+**Step 1 — passwords**
+The script creates `.env` with placeholder values and pauses. Open `.env` in an editor and set real passwords:
+
+```
+POSTGRES_PASSWORD=your-strong-db-password
+GRAFANA_ADMIN_PASSWORD=your-strong-grafana-password
+```
+
+Leave `ZABBIX_TOKEN` and `GRAFANA_TOKEN` as-is for now. Press Enter to continue.
+
+**Step 2 & 3 — core services start**
+PostgreSQL, Zabbix, and Grafana start automatically. The script polls until both are ready — no manual waiting needed.
+
+**Step 4 — API tokens**
+The script prints the Zabbix and Grafana URLs with login credentials, then pauses. During this pause:
+
+- Log in to Zabbix at <http://localhost:8080> (`Admin` / `zabbix`)
+  - Go to **Administration → API tokens → Create API token**
+  - Copy the token, paste it into `.env` as `ZABBIX_TOKEN=...`
+
+- Log in to Grafana at <http://localhost:3000> (`admin` / your `GRAFANA_ADMIN_PASSWORD`)
+  - Go to **Administration → Service accounts → Add service account**
+  - Create a service account, click **Add service account token**, copy it
+  - Paste it into `.env` as `GRAFANA_TOKEN=...`
+
+Press Enter once both tokens are saved.
+
+**Step 5 — MCP servers start**
+Both MCP servers build and start. The script detects automatically if `python:3.12-alpine` is unreachable (Docker Hub CDN issues) and substitutes a locally cached image.
+
+**Step 6 — admin portal credentials**
+Once the Zabbix MCP server is healthy, the script reads the auto-generated admin password from the container logs and prints it. Use these to log in to the admin portal at <http://localhost:9090>.
+
+The admin portal lets you manage Zabbix instances, API tokens, rate limits, and MCP client access without editing `config.toml` directly.
 
 ### Option B: manual setup
 
