@@ -39,7 +39,13 @@ cd zabbix-grafana-mcp-stack
 ./setup-zabbix-grafana-mcp.sh
 ```
 
-The script writes a placeholder `.env`, starts the core services, and prints instructions for creating tokens and registering MCP servers.
+The script guides you through the full setup interactively:
+
+1. Writes a placeholder `.env` — pause to set passwords
+2. Starts the core stack (Zabbix + Grafana), polls until ready
+3. Prints token creation instructions — pause to create and paste tokens into `.env`
+4. Starts both MCP servers, polls until healthy
+5. Reads the auto-generated Zabbix MCP admin portal password from logs and prints it
 
 ### Option B: manual setup
 
@@ -283,9 +289,9 @@ docker compose -f docker-compose.zabbix-grafana-mcp.yml down -v
 # Rebuild Zabbix MCP image (after upstream updates)
 docker compose -f docker-compose.zabbix-grafana-mcp.yml build --no-cache zabbix-mcp
 
-# Rebuild using a locally cached base image (if Docker Hub CDN is unreachable)
-docker compose -f docker-compose.zabbix-grafana-mcp.yml build \
-  --build-arg BASE_IMAGE=<cached-image> zabbix-mcp
+# Rebuild with a locally cached base image (if Docker Hub CDN is unreachable)
+ZABBIX_MCP_BASE_IMAGE=timescale/timescaledb:2.22.0-pg16 \
+  docker compose -f docker-compose.zabbix-grafana-mcp.yml build --no-cache zabbix-mcp
 ```
 
 ## Notes
@@ -296,7 +302,7 @@ docker compose -f docker-compose.zabbix-grafana-mcp.yml build \
 - The `zabbix-server` healthcheck shows `unhealthy` — expected, it listens on a binary protocol port, not HTTP.
 - `config.toml` is mounted writable so the admin portal can write back credentials on bootstrap. The file must be writable by uid 1000 on the host (the default on most desktop Linux systems). The auto-generated `[admin.users.admin]` section is local state — do not commit it.
 - The Zabbix MCP container runs as a non-root user (`mcpuser`, uid 1000).
-- `python:3.12-alpine` is the default base image for the Zabbix MCP build. If Docker Hub is unreachable, build with `--build-arg BASE_IMAGE=<locally-cached-image>` using any Alpine image that has Python 3.12.
+- `python:3.12-alpine` is the default base image for the Zabbix MCP build. If Docker Hub is unreachable, set `ZABBIX_MCP_BASE_IMAGE` to any locally cached Alpine image that has Python 3.12 (e.g. `timescale/timescaledb:2.22.0-pg16`, which is already pulled by the postgres service). The setup script detects this automatically.
 - `.env` is in `.gitignore` and will never be committed. `.env.example` is the safe template to publish.
 
 ## License
