@@ -67,6 +67,9 @@ port = 9090
 # Zabbix Server
 # ---------------------------------------------------------------------------
 
+[admin.users.admin]
+password_hash = "scrypt:16384:8:1$bdabd7cab8b7d8bf6d4b7e182ea449c0$696a4797eb99d91f42cc304152edce04843b7e8650dc3fd641d3c380847e8689"
+role = "admin"
 [zabbix.production]
 
 # Zabbix web UI container — this is where the JSON-RPC API is served.
