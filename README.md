@@ -9,11 +9,20 @@ A Docker Compose stack that runs Zabbix monitoring, Grafana, and MCP servers so 
 | Zabbix Web UI | 8080 | Zabbix frontend and JSON-RPC API |
 | Zabbix Server | 10051 | Monitoring engine (binary protocol, internal) |
 | Grafana | 3000 | Dashboard UI and API |
-| Zabbix MCP | 8001 | MCP server for Zabbix (`/sse`, `/mcp`) |
+| Zabbix MCP | 8001 | MCP server for Zabbix (`/sse`, `/mcp`) — optional profile |
 | Zabbix MCP Admin | 9090 | Admin portal for the Zabbix MCP server |
-| Grafana MCP | 8002 | MCP server for Grafana (`/sse`) |
+| Grafana MCP | 8002 | MCP server for Grafana (`/sse`) — optional profile |
 
 The database (PostgreSQL + TimescaleDB) runs internally on the `zabbix-net` bridge network with no exposed port.
+
+## Compose files
+
+| File | Purpose |
+|---|---|
+| `docker-compose.zabbix-grafana-mcp.yml` | Full stack: Zabbix + Grafana + both MCP servers |
+| `docker-compose.core.yml` | Core only: Zabbix + Grafana, no MCP servers |
+
+Use `docker-compose.core.yml` if you only want the monitoring stack without AI integration.
 
 ## Prerequisites
 
@@ -22,32 +31,46 @@ The database (PostgreSQL + TimescaleDB) runs internally on the `zabbix-net` brid
 
 ## Quick start
 
-### 1. Clone and configure
+### Option A: automated setup script
 
 ```bash
-git clone <repo-url> zabbix-grafana-mcp-stack
+git clone https://github.com/washosk/zabbix-grafana-mcp-stack.git
+cd zabbix-grafana-mcp-stack
+./setup-zabbix-grafana-mcp.sh
+```
+
+The script writes a placeholder `.env`, starts the core services, and prints instructions for creating tokens and registering MCP servers.
+
+### Option B: manual setup
+
+#### 1. Clone and configure
+
+```bash
+git clone https://github.com/washosk/zabbix-grafana-mcp-stack.git
 cd zabbix-grafana-mcp-stack
 cp .env.example .env
 ```
 
-Edit `.env` — you can leave placeholder values for now and fill them in after the services start:
+Edit `.env` and set strong passwords for the database and Grafana:
 
 ```
-ZABBIX_TOKEN=replace-with-real-zabbix-api-token
-GRAFANA_TOKEN=replace-with-real-grafana-service-account-token
+POSTGRES_PASSWORD=your-strong-db-password
+GRAFANA_ADMIN_PASSWORD=your-strong-grafana-password
 ```
 
-### 2. Start the core stack
+You can leave the `ZABBIX_TOKEN` and `GRAFANA_TOKEN` as placeholders for now — you'll fill those in after the services start.
+
+#### 2. Start the core stack
 
 ```bash
 docker compose -f docker-compose.zabbix-grafana-mcp.yml up -d
 ```
 
-This starts PostgreSQL, Zabbix Server, Zabbix Web UI, and Grafana. The Zabbix MCP and Grafana MCP services need real API tokens before they'll work, so get those next.
+This starts PostgreSQL, Zabbix Server, Zabbix Web UI, and Grafana. The MCP services require real API tokens, so get those next.
 
-### 3. Create a Zabbix API token
+#### 3. Create a Zabbix API token
 
-1. Open Zabbix at http://localhost:8080 (default login: `Admin` / `zabbix`)
+1. Open Zabbix at http://localhost:8080 (login: `Admin` / value of `POSTGRES_PASSWORD`)
 2. Go to **Administration → API tokens → Create API token**
 3. Name it (e.g. `mcp-server`), set an expiry or leave it unlimited, enable it
 4. Copy the generated token into `.env`:
@@ -55,9 +78,9 @@ This starts PostgreSQL, Zabbix Server, Zabbix Web UI, and Grafana. The Zabbix MC
    ZABBIX_TOKEN=your-token-here
    ```
 
-### 4. Create a Grafana service account token
+#### 4. Create a Grafana service account token
 
-1. Open Grafana at http://localhost:3000 (default login: `admin` / `admin`)
+1. Open Grafana at http://localhost:3000 (login: `admin` / value of `GRAFANA_ADMIN_PASSWORD`)
 2. Go to **Administration → Service accounts → Add service account**
 3. Name it (e.g. `mcp`), set role to **Viewer** (or higher if you want write access)
 4. Click **Add service account token**, copy the token into `.env`:
@@ -65,16 +88,20 @@ This starts PostgreSQL, Zabbix Server, Zabbix Web UI, and Grafana. The Zabbix MC
    GRAFANA_TOKEN=your-token-here
    ```
 
-### 5. Start the MCP servers
+#### 5. Start the MCP servers
 
-Restart to pick up the new tokens, then bring up the optional Zabbix MCP:
+Both MCP services are in the `optional` profile so they only start when you explicitly request them, after tokens are configured:
 
 ```bash
-docker compose -f docker-compose.zabbix-grafana-mcp.yml up -d
-docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d zabbix-mcp
+docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d
 ```
 
-The Grafana MCP starts automatically with the core stack. The Zabbix MCP is marked `optional` because it requires a token at build/start time.
+Or start them individually:
+
+```bash
+docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d zabbix-mcp
+docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d grafana-mcp
+```
 
 Verify everything is up:
 
@@ -93,7 +120,12 @@ curl http://localhost:8002/healthz  # Grafana MCP
 
 ### Claude Code
 
-Add to your Claude Code config (`~/.claude/settings.json` or project-level `.claude/settings.json`):
+```bash
+claude mcp add zabbix --transport sse http://localhost:8001/sse
+claude mcp add grafana --transport sse http://localhost:8002/sse
+```
+
+Or add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -108,13 +140,6 @@ Add to your Claude Code config (`~/.claude/settings.json` or project-level `.cla
     }
   }
 }
-```
-
-Or from the command line:
-
-```bash
-claude mcp add zabbix --transport sse http://localhost:8001/sse
-claude mcp add grafana --transport sse http://localhost:8002/sse
 ```
 
 ### VS Code (GitHub Copilot)
@@ -236,9 +261,11 @@ Pass the token in the Authorization header when registering the server:
 ## Useful commands
 
 ```bash
-# Start everything
+# Start core stack
 docker compose -f docker-compose.zabbix-grafana-mcp.yml up -d
-docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d zabbix-mcp
+
+# Start MCP servers (after tokens are configured in .env)
+docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d
 
 # View logs
 docker compose -f docker-compose.zabbix-grafana-mcp.yml logs -f
@@ -263,5 +290,9 @@ docker compose -f docker-compose.zabbix-grafana-mcp.yml build --no-cache zabbix-
 - **Grafana MCP** uses the official `grafana/mcp-grafana:latest` image.
 - The `grafana-mcp` healthcheck may show `unhealthy` in `docker ps` — this is a known upstream probe issue; the service responds normally on port 8002.
 - The `zabbix-server` healthcheck shows `unhealthy` — expected, it listens on a binary protocol port, not HTTP.
-- `config.toml` is mounted writable so the admin portal can write back credentials on bootstrap. Do not mount it `:ro`.
+- `config.toml` is mounted writable so the admin portal can write back credentials on bootstrap. The file must be writable by uid 1000 on the host (the default on most desktop Linux systems).
 - `.env` is in `.gitignore` and will never be committed. `.env.example` is the safe template to publish.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
