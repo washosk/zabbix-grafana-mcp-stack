@@ -70,7 +70,7 @@ This starts PostgreSQL, Zabbix Server, Zabbix Web UI, and Grafana. The MCP servi
 
 #### 3. Create a Zabbix API token
 
-1. Open Zabbix at http://localhost:8080 (login: `Admin` / value of `POSTGRES_PASSWORD`)
+1. Open Zabbix at http://localhost:8080 (login: `Admin` / `zabbix` — Zabbix's built-in default, unrelated to `POSTGRES_PASSWORD`)
 2. Go to **Administration → API tokens → Create API token**
 3. Name it (e.g. `mcp-server`), set an expiry or leave it unlimited, enable it
 4. Copy the generated token into `.env`:
@@ -106,7 +106,7 @@ docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d
 Verify everything is up:
 
 ```bash
-docker compose -f docker-compose.zabbix-grafana-mcp.yml ps
+docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional ps
 ```
 
 Test the MCP endpoints:
@@ -282,6 +282,10 @@ docker compose -f docker-compose.zabbix-grafana-mcp.yml down -v
 
 # Rebuild Zabbix MCP image (after upstream updates)
 docker compose -f docker-compose.zabbix-grafana-mcp.yml build --no-cache zabbix-mcp
+
+# Rebuild using a locally cached base image (if Docker Hub CDN is unreachable)
+docker compose -f docker-compose.zabbix-grafana-mcp.yml build \
+  --build-arg BASE_IMAGE=<cached-image> zabbix-mcp
 ```
 
 ## Notes
@@ -290,7 +294,9 @@ docker compose -f docker-compose.zabbix-grafana-mcp.yml build --no-cache zabbix-
 - **Grafana MCP** uses the official `grafana/mcp-grafana:latest` image.
 - The `grafana-mcp` healthcheck may show `unhealthy` in `docker ps` — this is a known upstream probe issue; the service responds normally on port 8002.
 - The `zabbix-server` healthcheck shows `unhealthy` — expected, it listens on a binary protocol port, not HTTP.
-- `config.toml` is mounted writable so the admin portal can write back credentials on bootstrap. The file must be writable by uid 1000 on the host (the default on most desktop Linux systems).
+- `config.toml` is mounted writable so the admin portal can write back credentials on bootstrap. The file must be writable by uid 1000 on the host (the default on most desktop Linux systems). The auto-generated `[admin.users.admin]` section is local state — do not commit it.
+- The Zabbix MCP container runs as a non-root user (`mcpuser`, uid 1000).
+- `python:3.12-alpine` is the default base image for the Zabbix MCP build. If Docker Hub is unreachable, build with `--build-arg BASE_IMAGE=<locally-cached-image>` using any Alpine image that has Python 3.12.
 - `.env` is in `.gitignore` and will never be committed. `.env.example` is the safe template to publish.
 
 ## License
