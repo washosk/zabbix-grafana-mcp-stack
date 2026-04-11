@@ -1,0 +1,14 @@
+# Uses timescale/timescaledb as base — already pulled by the stack,
+# avoids a separate python:slim pull that hits Docker Hub CDN.
+# Installs zabbix-mcp-server directly from GitHub (not on PyPI).
+FROM timescale/timescaledb:2.22.0-pg16
+
+RUN apk add --no-cache git \
+    && python3 -m venv /opt/zabbix-mcp/venv \
+    && /opt/zabbix-mcp/venv/bin/pip install --no-cache-dir \
+       git+https://github.com/initMAX/zabbix-mcp-server.git
+
+EXPOSE 8080 9090
+
+ENTRYPOINT ["/opt/zabbix-mcp/venv/bin/zabbix-mcp-server"]
+CMD ["--config", "/etc/zabbix-mcp/config.toml"]

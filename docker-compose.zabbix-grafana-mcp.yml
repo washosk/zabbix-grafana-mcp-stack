@@ -1,0 +1,151 @@
+services:
+  # PostgreSQL + TimescaleDB
+  postgres:
+    image: timescale/timescaledb:2.22.0-pg16
+    container_name: zabbix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - zabbix-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Zabbix Server
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
+    container_name: zabbix-server
+    restart: unless-stopped
+    environment:
+      DB_SERVER_HOST: postgres
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      ZBX_SERVER_NAME: "Share Zabbix"
+      ZBX_ENABLE_TIMESCALEDB: "true"
+    ports:
+      - "10051:10051"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zabbix-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10051/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Zabbix Web UI
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
+    container_name: zabbix-web
+    restart: unless-stopped
+    environment:
+      DB_SERVER_HOST: postgres
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_PORT: "10051"
+      ZBX_SERVER_NAME: "Share Zabbix"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - zabbix-server
+      - postgres
+    networks:
+      - zabbix-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - /home/fernando/Pictures/icons:/usr/share/grafana/public/img/icons/share:ro
+    depends_on:
+      - postgres
+    networks:
+      - zabbix-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Zabbix MCP Server
+  # NOTE: Requires a real Zabbix API token. Set ZABBIX_TOKEN in .env, then:
+  #   docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d zabbix-mcp
+  zabbix-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.zabbix-mcp
+    container_name: zabbix-mcp
+    restart: unless-stopped
+    ports:
+      - "8001:8080"   # MCP server (SSE: http://localhost:8001/sse)
+      - "9090:9090"   # Admin portal: http://localhost:9090
+    environment:
+      ZABBIX_TOKEN: ${ZABBIX_TOKEN}
+    volumes:
+      - ./config.toml:/etc/zabbix-mcp/config.toml
+    depends_on:
+      - zabbix-web
+    networks:
+      - zabbix-net
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - optional
+
+  # Grafana MCP Server
+  grafana-mcp:
+    image: grafana/mcp-grafana:latest
+    container_name: grafana-mcp
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: ${GRAFANA_TOKEN}
+    depends_on:
+      - grafana
+    networks:
+      - zabbix-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  grafana_data:
+
+networks:
+  zabbix-net:
+    driver: bridge
