@@ -90,6 +90,15 @@ read -r -p "Press Enter when both tokens are set in .env to start MCP servers...
 # --- Step 5: start MCP servers ---------------------------------------------
 echo ""
 echo -e "${YELLOW}Step 5: Starting MCP servers...${NC}"
+
+# python:3.12-alpine is the default build base. If it is not cached and
+# Docker Hub CDN is unreachable, fall back to timescale/timescaledb which
+# is guaranteed to be cached after step 2 (it runs the postgres service).
+if ! docker image inspect python:3.12-alpine > /dev/null 2>&1; then
+    echo -e "${YELLOW}  python:3.12-alpine not in local cache — using timescale/timescaledb as build base${NC}"
+    export ZABBIX_MCP_BASE_IMAGE=timescale/timescaledb:2.22.0-pg16
+fi
+
 $COMPOSE --profile optional up -d
 
 echo -n "  Zabbix MCP"

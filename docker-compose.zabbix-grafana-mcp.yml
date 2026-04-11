@@ -99,6 +99,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.zabbix-mcp
+      args:
+        BASE_IMAGE: ${ZABBIX_MCP_BASE_IMAGE:-python:3.12-alpine}
     container_name: zabbix-mcp
     restart: unless-stopped
     ports:
