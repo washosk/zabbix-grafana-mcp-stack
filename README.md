@@ -167,6 +167,33 @@ claude mcp add grafana --transport sse http://localhost:8002/sse
 }
 ```
 
+### OpenCode (CLI Assistant)
+
+OpenCode is a Go-based CLI assistant that supports remote MCP servers. You can use it with **OpenRouter** to access free-tier models (like Gemini or Llama).
+
+1.  Create or edit `~/.opencode/opencode.json` (or use the provided [example](config/opencode.json.example)).
+2.  Configure the `openai` provider to point to OpenRouter:
+
+```json
+{
+  "model": "google/gemini-2.0-flash-exp:free",
+  "provider": "openai",
+  "openai": {
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key": "your-openrouter-key"
+  },
+  "mcp": [
+    { "name": "zabbix", "type": "remote", "url": "http://localhost:8001/sse" },
+    { "name": "grafana", "type": "remote", "url": "http://localhost:8002/sse" }
+  ]
+}
+```
+
+### Cursor / Windsurf / other editors
+
+- **Zabbix**: `http://localhost:8001/sse`
+- **Grafana**: `http://localhost:8002/sse`
+
 ---
 
 ## Configuration
