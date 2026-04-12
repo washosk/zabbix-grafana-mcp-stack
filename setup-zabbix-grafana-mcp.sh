@@ -27,29 +27,37 @@ fi
 # --- Step 1: .env ----------------------------------------------------------
 echo -e "${YELLOW}Step 1: Writing placeholder .env file...${NC}"
 cat > .env << 'EOF'
-# PostgreSQL password (used by Zabbix server, web UI, and the database itself)
+# PostgreSQL password (used by Zabbix server and the database itself)
 POSTGRES_PASSWORD=changeme-db-password
 
-# Grafana admin password (login at http://localhost:3000 with user "admin")
-GRAFANA_ADMIN_PASSWORD=changeme-grafana-password
+# Grafana admin password (default: admin)
+GRAFANA_ADMIN_PASSWORD=admin
 
-# Zabbix API token — create in Zabbix: Administration → API tokens
+# Password for the 'grafana_ro' read-only user (Grafana → Zabbix PostgreSQL datasource)
+GRAFANA_RO_PASSWORD=changeme-grafana-ro-password
+
+# Zabbix Admin password (must match the Zabbix 'Admin' account; default: zabbix)
+GRAFANA_ZABBIX_PASSWORD=zabbix
+
+# MCP tokens — create in Step 4
 ZABBIX_TOKEN=replace-with-real-zabbix-api-token
-
-# Grafana service account token — create in Grafana: Administration → Service accounts
 GRAFANA_TOKEN=replace-with-real-grafana-service-account-token
+
+# Overrides
+TIMEZONE=Europe/Madrid
 EOF
+
 echo -e "${GREEN}✓ .env created${NC}"
 echo ""
-echo -e "${YELLOW}  Edit .env now and set strong passwords before continuing.${NC}"
-echo -e "${YELLOW}  Leave ZABBIX_TOKEN and GRAFANA_TOKEN for now — you'll get those next.${NC}"
+echo -e "${YELLOW}  Set real passwords in .env for POSTGRES_PASSWORD and GRAFANA_RO_PASSWORD.${NC}"
+echo -e "${YELLOW}  GRAFANA_ADMIN_PASSWORD is set to 'admin' by default.${NC}"
 echo ""
-read -r -p "Press Enter when ready to start the core stack..."
+read -r -p "Press Enter when ready to start the full stack..."
 
-# --- Step 2: start core stack ----------------------------------------------
+# --- Step 2: start stack ---------------------------------------------------
 echo ""
-echo -e "${YELLOW}Step 2: Starting core services (Zabbix + Grafana)...${NC}"
-$COMPOSE up -d
+echo -e "${YELLOW}Step 2: Starting all services (Zabbix + Grafana + MCP + Backup)...${NC}"
+$COMPOSE up -d --build
 
 # --- Step 3: wait for services ---------------------------------------------
 echo ""
@@ -73,7 +81,7 @@ echo "║  Services Ready — Create API Tokens                           ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 echo -e "${CYAN}Zabbix Web UI:${NC}  http://localhost:8080  (Admin / zabbix)"
-echo -e "${CYAN}Grafana:${NC}        http://localhost:3000  (admin / your GRAFANA_ADMIN_PASSWORD)"
+echo -e "${CYAN}Grafana:${NC}        http://localhost:3000  (admin / admin)"
 echo ""
 echo "CREATE ZABBIX API TOKEN:"
 echo "  1. Log in to http://localhost:8080"
@@ -85,21 +93,13 @@ echo "  1. Log in to http://localhost:3000"
 echo "  2. Go to: Administration → Service accounts → Add service account"
 echo "  3. Add a token, copy it into .env: GRAFANA_TOKEN=<your-token>"
 echo ""
-read -r -p "Press Enter when both tokens are set in .env to start MCP servers..."
+echo -e "${YELLOW}  Save .env and press Enter to restart MCP servers with the new tokens.${NC}"
+read -r -p "Press Enter when ready..."
 
-# --- Step 5: start MCP servers ---------------------------------------------
+# --- Step 5: restart MCP ---------------------------------------------------
 echo ""
-echo -e "${YELLOW}Step 5: Starting MCP servers...${NC}"
-
-# python:3.12-alpine is the default build base. If it is not cached and
-# Docker Hub CDN is unreachable, fall back to timescale/timescaledb which
-# is guaranteed to be cached after step 2 (it runs the postgres service).
-if ! docker image inspect python:3.12-alpine > /dev/null 2>&1; then
-    echo -e "${YELLOW}  python:3.12-alpine not in local cache — using timescale/timescaledb as build base${NC}"
-    export ZABBIX_MCP_BASE_IMAGE=timescale/timescaledb:2.22.0-pg16
-fi
-
-$COMPOSE --profile optional up -d
+echo -e "${YELLOW}Step 5: Restarting MCP servers...${NC}"
+$COMPOSE restart zabbix-mcp grafana-mcp
 
 echo -n "  Zabbix MCP"
 until curl -sf http://localhost:8001/health > /dev/null 2>&1; do
@@ -158,8 +158,8 @@ echo "    }"
 echo "  }"
 echo ""
 echo -e "${GREEN}Useful commands:${NC}"
+echo "  View status:  $COMPOSE ps"
 echo "  View logs:    $COMPOSE logs -f"
 echo "  Stop stack:   $COMPOSE down"
 echo "  Full reset:   $COMPOSE down -v"
-echo "  Status:       $COMPOSE --profile optional ps"
 echo ""

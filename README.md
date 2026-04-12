@@ -1,84 +1,64 @@
 # Zabbix + Grafana + MCP Stack
 
-A Docker Compose stack that runs Zabbix monitoring, Grafana, and MCP servers so AI assistants (Claude Code, VS Code Copilot, Cursor) can query your infrastructure directly.
+A Docker Compose stack that integrates Zabbix 7.0 monitoring, Grafana, and MCP servers so AI assistants (Claude Code, VS Code Copilot, Cursor) can query your infrastructure directly.
+
+Tested on a clean install: Zabbix 7.0.25, TimescaleDB 2.22.0-pg16, Grafana latest.
+
+---
 
 ## Services
 
-| Service | Port | Description |
+| Container | Port | Description |
 |---|---|---|
-| Zabbix Web UI | 8080 | Zabbix frontend and JSON-RPC API |
-| Zabbix Server | 10051 | Monitoring engine (binary protocol, internal) |
-| Grafana | 3000 | Dashboard UI and API |
-| Zabbix MCP | 8001 | MCP server for Zabbix (`/sse`, `/mcp`) — optional profile |
-| Zabbix MCP Admin | 9090 | Admin portal for the Zabbix MCP server |
-| Grafana MCP | 8002 | MCP server for Grafana (`/sse`) — optional profile |
+| `zabbix-postgres` | — (internal) | PostgreSQL 16 + TimescaleDB — Zabbix and Grafana backend |
+| `zabbix-server` | 10051 | Zabbix monitoring engine |
+| `zabbix-web` | 8080 | Zabbix UI + JSON-RPC API |
+| `grafana` | 3000 | Grafana dashboard + auto-provisioned datasources |
+| `zabbix-pg-backup` | — | Daily rolling `pg_dump` to `data/pg-backups/` |
+| `zabbix-mcp` | 8001, 9090 | MCP server for Zabbix (`/sse`, `/mcp`) + admin portal |
+| `grafana-mcp` | 8002 | MCP server for Grafana (`/sse`) |
+| `zabbix-java-gateway` | 10052 | JMX monitoring gateway |
+| `zabbix-snmptraps` | 162/udp | SNMP trap receiver |
 
-The database (PostgreSQL + TimescaleDB) runs internally on the `zabbix-net` bridge network with no exposed port.
+## Repository layout
 
-## Compose files
+```
+.
+├── config/                          # Committed config — mounted into containers
+│   ├── backup/
+│   │   ├── Dockerfile               # Alpine pg_dump cron image
+│   │   ├── backup.sh                # pg_dump script (schema-only for history/trends)
+│   │   └── crontab                  # Daily 02:05 schedule
+│   ├── grafana/
+│   │   └── provisioning/
+│   │       ├── datasources/
+│   │       │   └── zabbix.yaml      # Auto-provisions Zabbix API + PostgreSQL datasources
+│   │       └── plugins/
+│   │           └── zabbix-app.yaml  # Enables alexanderzobnin-zabbix-app on startup
+│   ├── postgres/
+│   │   └── init-grafana.sh          # Creates grafana DB/user + grafana_ro at first PG init
+│   └── snmptrapd.conf               # SNMP trap daemon config
+├── config.toml                      # Zabbix MCP server config (writable)
+├── Dockerfile.zabbix-mcp            # Builds the Zabbix MCP image from source
+├── docker-compose.zabbix-grafana-mcp.yml   # Full stack
+├── .env.example                     # Safe template — copy to .env and fill in
+└── data/                            # Runtime data — gitignored
+    └── pg-backups/                  # zbx_cfg_1.sql.gz … zbx_cfg_7.sql.gz
+```
 
-| File | Purpose |
-|---|---|
-| `docker-compose.zabbix-grafana-mcp.yml` | Full stack: Zabbix + Grafana + both MCP servers |
-| `docker-compose.core.yml` | Core only: Zabbix + Grafana, no MCP servers |
-
-Use `docker-compose.core.yml` if you only want the monitoring stack without AI integration.
+---
 
 ## Prerequisites
 
-- Docker and Docker Compose v2
-- Internet access for the first `docker compose up` (pulls images, builds Zabbix MCP from GitHub)
+- Docker Engine 24+ and Docker Compose v2 (`docker compose`, not `docker-compose`)
+- Internet access on first run (pulls images, builds Zabbix MCP from GitHub)
+- Port 162/udp available on the host for SNMP traps (if needed)
+
+---
 
 ## Quick start
 
-### Option A: automated setup script
-
-```bash
-git clone https://github.com/washosk/zabbix-grafana-mcp-stack.git
-cd zabbix-grafana-mcp-stack
-./setup-zabbix-grafana-mcp.sh
-```
-
-The script walks through the full setup in one session. Here is what happens at each step:
-
-**Step 1 — passwords**
-The script creates `.env` with placeholder values and pauses. Open `.env` in an editor and set real passwords:
-
-```
-POSTGRES_PASSWORD=your-strong-db-password
-GRAFANA_ADMIN_PASSWORD=your-strong-grafana-password
-```
-
-Leave `ZABBIX_TOKEN` and `GRAFANA_TOKEN` as-is for now. Press Enter to continue.
-
-**Step 2 & 3 — core services start**
-PostgreSQL, Zabbix, and Grafana start automatically. The script polls until both are ready — no manual waiting needed.
-
-**Step 4 — API tokens**
-The script prints the Zabbix and Grafana URLs with login credentials, then pauses. During this pause:
-
-- Log in to Zabbix at <http://localhost:8080> (`Admin` / `zabbix`)
-  - Go to **Administration → API tokens → Create API token**
-  - Copy the token, paste it into `.env` as `ZABBIX_TOKEN=...`
-
-- Log in to Grafana at <http://localhost:3000> (`admin` / your `GRAFANA_ADMIN_PASSWORD`)
-  - Go to **Administration → Service accounts → Add service account**
-  - Create a service account, click **Add service account token**, copy it
-  - Paste it into `.env` as `GRAFANA_TOKEN=...`
-
-Press Enter once both tokens are saved.
-
-**Step 5 — MCP servers start**
-Both MCP servers build and start. The script detects automatically if `python:3.12-alpine` is unreachable (Docker Hub CDN issues) and substitutes a locally cached image.
-
-**Step 6 — admin portal credentials**
-Once the Zabbix MCP server is healthy, the script reads the auto-generated admin password from the container logs and prints it. Use these to log in to the admin portal at <http://localhost:9090>.
-
-The admin portal lets you manage Zabbix instances, API tokens, rate limits, and MCP client access without editing `config.toml` directly.
-
-### Option B: manual setup
-
-#### 1. Clone and configure
+### Step 1 — configure passwords
 
 ```bash
 git clone https://github.com/washosk/zabbix-grafana-mcp-stack.git
@@ -86,70 +66,84 @@ cd zabbix-grafana-mcp-stack
 cp .env.example .env
 ```
 
-Edit `.env` and set strong passwords for the database and Grafana:
+Edit `.env` and set **all** passwords before the first `up`:
 
-```
+```env
 POSTGRES_PASSWORD=your-strong-db-password
-GRAFANA_ADMIN_PASSWORD=your-strong-grafana-password
+GRAFANA_ADMIN_PASSWORD=admin                             # default for testing
+GRAFANA_RO_PASSWORD=your-strong-ro-password              # read-only datasource user
+GRAFANA_ZABBIX_PASSWORD=zabbix                           # must match Zabbix Admin password
+TIMEZONE=Europe/Madrid                                   # affects cron schedule and logs
 ```
 
-You can leave the `ZABBIX_TOKEN` and `GRAFANA_TOKEN` as placeholders for now — you'll fill those in after the services start.
+Set the MCP tokens too — the containers start regardless, but need tokens to connect:
 
-#### 2. Start the core stack
+```env
+ZABBIX_TOKEN=your-zabbix-api-token     # create in Zabbix: Administration → API tokens
+GRAFANA_TOKEN=your-grafana-sa-token    # create in Grafana: Administration → Service accounts
+```
+
+See [Step 4](#step-4--create-api-tokens-for-mcp-servers) for how to get those tokens.
+
+> [!IMPORTANT]
+> The Grafana DB users are created by `config/postgres/init-grafana.sh` on PostgreSQL's **first init**.
+> If you change `GRAFANA_DB_PASSWORD` or `GRAFANA_RO_PASSWORD` after the first start, you must wipe the volume to re-init:
+> `docker compose -f docker-compose.zabbix-grafana-mcp.yml down -v`
+
+### Step 2 — start the stack
 
 ```bash
 docker compose -f docker-compose.zabbix-grafana-mcp.yml up -d
 ```
 
-This starts PostgreSQL, Zabbix Server, Zabbix Web UI, and Grafana. The MCP services require real API tokens, so get those next.
+This starts **all 9 containers**. Everything is fully functional immediately, though MCP servers will log connection errors until you add the tokens in Step 4.
 
-#### 3. Create a Zabbix API token
+Expected output after settling (~2 minutes):
 
-1. Open Zabbix at http://localhost:8080 (login: `Admin` / `zabbix` — Zabbix's built-in default, unrelated to `POSTGRES_PASSWORD`)
+```
+NAME                   STATUS
+grafana                Up 2 minutes (healthy)
+grafana-mcp            Up 2 minutes (healthy)
+zabbix-java-gateway    Up 2 minutes (healthy)
+zabbix-pg-backup       Up 2 minutes (healthy)
+zabbix-postgres        Up 2 minutes (healthy)
+zabbix-server          Up 2 minutes (healthy)
+zabbix-snmptraps       Up 2 minutes (healthy)
+zabbix-mcp             Up 2 minutes (healthy)
+zabbix-web             Up 2 minutes (healthy)
+```
+
+### Step 3 — verify Grafana datasources
+
+Open Grafana at <http://localhost:3000> and log in with `admin` / `GRAFANA_ADMIN_PASSWORD`.
+
+Go to **Connections → Data sources** — you should see two auto-provisioned datasources:
+
+| Datasource | Type | Description |
+|---|---|---|
+| **Zabbix** | `alexanderzobnin-zabbix-datasource` | API connection (triggers/host data) |
+| **Zabbix PostgreSQL** | `postgres` | Direct DB connection (SQL panels/TimescaleDB) |
+
+Check that both show green. If the Zabbix API one fails, verify `GRAFANA_ZABBIX_PASSWORD` in `.env`.
+
+### Step 4 — create API tokens for MCP servers
+
+The MCP containers are already running. Add tokens so they can connect:
+
+**Zabbix token:**
+1. Log in to Zabbix at <http://localhost:8080> (`Admin` / `zabbix`)
 2. Go to **Administration → API tokens → Create API token**
-3. Name it (e.g. `mcp-server`), set an expiry or leave it unlimited, enable it
-4. Copy the generated token into `.env`:
-   ```
-   ZABBIX_TOKEN=your-token-here
-   ```
+3. Name it `mcp-server`, set unlimited expiry, copy the token to `ZABBIX_TOKEN` in `.env`.
 
-#### 4. Create a Grafana service account token
-
-1. Open Grafana at http://localhost:3000 (login: `admin` / value of `GRAFANA_ADMIN_PASSWORD`)
+**Grafana token:**
+1. Log in to Grafana at <http://localhost:3000>
 2. Go to **Administration → Service accounts → Add service account**
-3. Name it (e.g. `mcp`), set role to **Viewer** (or higher if you want write access)
-4. Click **Add service account token**, copy the token into `.env`:
-   ```
-   GRAFANA_TOKEN=your-token-here
-   ```
+3. Name it `mcp`, set role **Viewer**, click **Add service account token**, copy to `GRAFANA_TOKEN` in `.env`.
 
-#### 5. Start the MCP servers
+Restart the MCP containers after saving tokens:
+`docker compose -f docker-compose.zabbix-grafana-mcp.yml restart zabbix-mcp grafana-mcp`
 
-Both MCP services are in the `optional` profile so they only start when you explicitly request them, after tokens are configured:
-
-```bash
-docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d
-```
-
-Or start them individually:
-
-```bash
-docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d zabbix-mcp
-docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d grafana-mcp
-```
-
-Verify everything is up:
-
-```bash
-docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional ps
-```
-
-Test the MCP endpoints:
-
-```bash
-curl http://localhost:8001/health   # Zabbix MCP
-curl http://localhost:8002/healthz  # Grafana MCP
-```
+---
 
 ## Register MCP servers in your AI client
 
@@ -160,179 +154,78 @@ claude mcp add zabbix --transport sse http://localhost:8001/sse
 claude mcp add grafana --transport sse http://localhost:8002/sse
 ```
 
-Or add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "zabbix": {
-      "type": "sse",
-      "url": "http://localhost:8001/sse"
-    },
-    "grafana": {
-      "type": "sse",
-      "url": "http://localhost:8002/sse"
-    }
-  }
-}
-```
-
 ### VS Code (GitHub Copilot)
-
-Add to your VS Code `settings.json`:
 
 ```json
 {
   "mcp": {
     "servers": {
-      "zabbix": {
-        "type": "sse",
-        "url": "http://localhost:8001/sse"
-      },
-      "grafana": {
-        "type": "sse",
-        "url": "http://localhost:8002/sse"
-      }
+      "zabbix": { "type": "sse", "url": "http://localhost:8001/sse" },
+      "grafana": { "type": "sse", "url": "http://localhost:8002/sse" }
     }
   }
 }
 ```
 
-### Cursor / Windsurf / other editors
-
-Use the SSE URLs:
-- Zabbix: `http://localhost:8001/sse`
-- Grafana: `http://localhost:8002/sse`
-
-If your client supports Streamable HTTP sessions, use `/mcp` instead of `/sse`.
+---
 
 ## Configuration
 
-### config.toml
+### `.env` reference
 
-The Zabbix MCP server is configured through `config.toml`, which is mounted into the container. Changes take effect after restarting the service.
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `POSTGRES_PASSWORD` | ✅ | — | PostgreSQL password for the `zabbix` user |
+| `GRAFANA_ADMIN_PASSWORD` | ✅ | `admin` | Grafana `admin` UI password |
+| `GRAFANA_RO_PASSWORD` | ✅ | — | Password for `grafana_ro` read-only datasource user |
+| `GRAFANA_ZABBIX_PASSWORD` | ✅ | `zabbix` | Zabbix Admin password (for Grafana datasource) |
+| `ZABBIX_TOKEN` | MCP only | — | Zabbix API token for `zabbix-mcp` |
+| `GRAFANA_TOKEN` | MCP only | — | Grafana service account token |
+| `TIMEZONE` | | `Europe/Madrid` | Container timezone |
 
-Key settings:
+### Backup (`config/backup/`)
 
-```toml
-[server]
-transport = "sse"        # "sse" or "http"
-compact_output = true    # reduces token usage; LLM can override per-call
-rate_limit = 300         # max Zabbix API calls/minute per session (0 = unlimited)
+**Schedule:** Daily at 02:05 (`TIMEZONE` in `.env`).
+**What:** Config data (hosts, items...) is fully dumped. High-volume tables (`history`, `events`) are schema-only.
+**Files:** `data/pg-backups/zbx_cfg_[1-7].sql.gz` (7-day rotation).
 
-[admin]
-enabled = true
-port = 9090
+Trigger an immediate dump:
+`docker compose -f docker-compose.zabbix-grafana-mcp.yml exec zabbix-pg-backup /usr/local/bin/backup.sh`
 
-[zabbix.production]
-url = "http://zabbix-web:8080"
-api_token = "${ZABBIX_TOKEN}"
-read_only = false        # set to true to block all write operations
-verify_ssl = false
-```
-
-You can add a second Zabbix instance (e.g. staging) by adding another `[zabbix.<name>]` section:
-
-```toml
-[zabbix.staging]
-url = "https://zabbix-staging.example.com"
-api_token = "${ZABBIX_STAGING_TOKEN}"
-read_only = true
-verify_ssl = true
-```
-
-### Admin portal
-
-The admin portal runs at http://localhost:9090. On first start it auto-generates credentials and writes them into `config.toml`. Check the container logs to get the initial password:
-
-```bash
-docker compose -f docker-compose.zabbix-grafana-mcp.yml logs zabbix-mcp | grep -i password
-```
-
-## Security hardening
-
-By default the MCP server accepts connections from anyone on the network. For production or shared environments, enable token authentication.
-
-### Generate a token
-
-```bash
-python3 -c "
-import secrets, hashlib
-t = 'zmcp_' + secrets.token_hex(32)
-h = hashlib.sha256(t.encode()).hexdigest()
-print(f'Token: {t}')
-print(f'Hash:  sha256:{h}')
-"
-```
-
-### Add to config.toml
-
-```toml
-[tokens.claude]
-name = "Claude Code"
-token_hash = "sha256:<paste-hash-here>"
-scopes = ["*"]
-read_only = true
-```
-
-### Use in your MCP client
-
-Pass the token in the Authorization header when registering the server:
-
-```json
-{
-  "mcpServers": {
-    "zabbix": {
-      "type": "sse",
-      "url": "http://localhost:8001/sse",
-      "headers": {
-        "Authorization": "Bearer zmcp_..."
-      }
-    }
-  }
-}
-```
+---
 
 ## Useful commands
 
 ```bash
-# Start core stack
+# Start all services
 docker compose -f docker-compose.zabbix-grafana-mcp.yml up -d
-
-# Start MCP servers (after tokens are configured in .env)
-docker compose -f docker-compose.zabbix-grafana-mcp.yml --profile optional up -d
 
 # View logs
 docker compose -f docker-compose.zabbix-grafana-mcp.yml logs -f
-docker compose -f docker-compose.zabbix-grafana-mcp.yml logs -f zabbix-mcp
 
-# Restart after config.toml changes
-docker compose -f docker-compose.zabbix-grafana-mcp.yml restart zabbix-mcp
+# Trigger manual backup
+docker compose -f docker-compose.zabbix-grafana-mcp.yml exec zabbix-pg-backup /usr/local/bin/backup.sh
 
-# Stop all services
+# Stop stack
 docker compose -f docker-compose.zabbix-grafana-mcp.yml down
 
-# Stop and remove volumes (full reset, loses all Zabbix and Grafana data)
+# Full reset (wipes all data/volumes)
 docker compose -f docker-compose.zabbix-grafana-mcp.yml down -v
-
-# Rebuild Zabbix MCP image (after upstream updates)
-docker compose -f docker-compose.zabbix-grafana-mcp.yml build --no-cache zabbix-mcp
-
-# Rebuild with a locally cached base image (if Docker Hub CDN is unreachable)
-ZABBIX_MCP_BASE_IMAGE=timescale/timescaledb:2.22.0-pg16 \
-  docker compose -f docker-compose.zabbix-grafana-mcp.yml build --no-cache zabbix-mcp
+rm -rf data/pg-backups/
 ```
+
+---
 
 ## Notes
 
-- **Zabbix MCP** is built from source ([initMAX/zabbix-mcp-server](https://github.com/initMAX/zabbix-mcp-server)) on first `docker compose up`. Subsequent starts use the cached image.
-- **Grafana MCP** uses the official `grafana/mcp-grafana:latest` image.
-- The `grafana-mcp` healthcheck may show `unhealthy` in `docker ps` — this is a known upstream probe issue; the service responds normally on port 8002.
-- The `zabbix-server` healthcheck shows `unhealthy` — expected, it listens on a binary protocol port, not HTTP.
-- `config.toml` is mounted writable so the admin portal can write back credentials on bootstrap. The file must be writable by uid 1000 on the host (the default on most desktop Linux systems). The auto-generated `[admin.users.admin]` section is local state — do not commit it.
-- The Zabbix MCP container runs as a non-root user (`mcpuser`, uid 1000).
-- `python:3.12-alpine` is the default base image for the Zabbix MCP build. If Docker Hub is unreachable, set `ZABBIX_MCP_BASE_IMAGE` to any locally cached Alpine image that has Python 3.12 (e.g. `timescale/timescaledb:2.22.0-pg16`, which is already pulled by the postgres service). The setup script detects this automatically.
-- `.env` is in `.gitignore` and will never be committed. `.env.example` is the safe template to publish.
+- **Grafana Backend**: Uses the default internal SQLite database for simplicity.
+- **Zabbix Server Health**: Lists as `healthy` if port 10051 is listening.
+- **Zabbix MCP** is built from source ([initMAX/zabbix-mcp-server](https://github.com/initMAX/zabbix-mcp-server)) on first `up` using `python:3.12-alpine` as base. The built image is cached; subsequent starts are fast.
+- **`data/` is gitignored** — backup files, any stray bind-mount directories. Never committed.
+- **`.env` is gitignored** — use `.env.example` as the committed template.
+- The Zabbix MCP container runs as non-root (`mcpuser`, uid 1000). The `config.toml` bind-mount must be writable by uid 1000 on the host (default on desktop Linux).
+
+---
 
 ## License
 

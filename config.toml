@@ -68,7 +68,7 @@ port = 9090
 # ---------------------------------------------------------------------------
 
 [admin.users.admin]
-password_hash = "scrypt:16384:8:1$bdabd7cab8b7d8bf6d4b7e182ea449c0$696a4797eb99d91f42cc304152edce04843b7e8650dc3fd641d3c380847e8689"
+password_hash = "scrypt:16384:8:1$af71be0d2e97015990c8f91c82041a05$4ce576490376bf3e95716773c6b892e72c4c265d6e5bb52991d781a64ba9c69e"
 role = "admin"
 [zabbix.production]
 

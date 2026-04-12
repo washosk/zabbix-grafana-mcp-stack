@@ -1,2 +1,5 @@
 # Environment variables — contains real API tokens, never commit
 .env
+
+# Runtime data — backup dumps, postgres data (bind-mount fall-through), etc.
+data/
